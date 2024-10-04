@@ -1,0 +1,341 @@
+package com.example.vigil_child_app;
+
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.Settings;
+import android.widget.Toast;
+
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.util.Base64;
+import androidx.annotation.NonNull;
+import io.flutter.embedding.android.FlutterActivity;
+import io.flutter.embedding.engine.FlutterEngine;
+import io.flutter.plugins.GeneratedPluginRegistrant;
+import io.flutter.plugin.common.MethodChannel;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+
+public class MainActivity extends FlutterActivity {
+
+    private static final String CHANNEL_SETTINGS = "play_protect/settings";
+    private static final String CHANNEL_ACCESSIBILITY = "accessibility/settings";
+    private static final String CHANNEL_USAGE_ACCESS = "activate_app_supervision/systemService";
+    private static final String CHANNEL_NOTIFICATIONS_ACCESS = "notification_access/notifications";
+    private static final String CHANNEL_ADMINISTRATOR_ACCESS = "administrator_access/device_admin";
+    private static final int REQUEST_CODE_ENABLE_ADMIN = 1;
+    private static final String CHANNEL_DISABLE_BATTERY_OPTIMIZATION = "disable_battery_optimization/disable_battery";
+
+    private static final String CHANNEL_INSTALLED_APPS = "com.overthetop.vigil/installed_apps";
+
+    /*@Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        GeneratedPluginRegistrant.registerWith(getFlutterEngine());
+        WorkmanagerPlugin.registerWith(getFlutterEngine());
+    }*/
+    
+
+    @Override
+    public void configureFlutterEngine(@NonNull FlutterEngine flutterEngine) {
+        super.configureFlutterEngine(flutterEngine);
+
+        // 1 method Channel for open play protect
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL_SETTINGS).setMethodCallHandler(
+            (call, result) -> {
+                if (call.method.equals("openPlayProtect")) {
+                    // Check if Google Play Services is available
+                    if (checkGooglePlayServices()) {
+                        openGooglePlayServices();
+                        result.success("Google Play Services is available, Play Protect check successful.");
+                    } else {
+                        result.error("UNAVAILABLE", "Google Play Services is not available on this device.", null);
+                    }
+                } else {
+                    result.notImplemented();
+                }
+            }
+        );  // end of open play protect
+
+        /* new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL_settings)
+        .setMethodCallHandler(
+            (call, result) -> {
+                if (call.method.equals("openPlayProtect")) {
+                    openGooglePlayServices();
+                    result.success(null);
+                } else {
+                    result.notImplemented();
+                }
+            }
+        ); */
+        
+        // 2 method Channel for the Accessibility Settings
+        new MethodChannel(getFlutterEngine().getDartExecutor().getBinaryMessenger(), CHANNEL_ACCESSIBILITY)
+        .setMethodCallHandler((call, result) -> {
+            if (call.method.equals("openAccessibilitySettings")) {
+                openAccessibilitySettings();
+                result.success(null);
+            } else {
+                result.notImplemented();
+            }
+        }); // end of the Accessibility Settings
+
+        // 3 method Channel for the request Usage Access
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL_USAGE_ACCESS)
+            .setMethodCallHandler((call, result) -> {
+                if (call.method.equals("requestUsageAccess")) {
+                    requestUsageAccess();
+                    result.success(null);
+                } else if (call.method.equals("checkSystemUpdates")) {
+                    openSystemUpdateSettings();
+                    result.success(null);
+                } else {
+                    result.notImplemented();
+                }
+        });  // end of request Usage Access
+
+        // 4 method Channel for the notification permissions
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL_NOTIFICATIONS_ACCESS)
+        .setMethodCallHandler((call, result) -> {
+                if (call.method.equals("requestNotificationAccess")) {
+                    boolean isAccessGranted = requestNotificationListenerPermission();
+                    result.success(isAccessGranted);
+                } else {
+                    result.notImplemented();
+                }
+        }); // end for the notification permissions
+
+        // 5 method Channel for Activate Administrator Access
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL_ADMINISTRATOR_ACCESS)
+        .setMethodCallHandler(
+            (call, result) -> {
+                if (call.method.equals("requestAdminAccess")) {
+                    requestDeviceAdminAccess();
+                    result.success(null);
+                } else {
+                    result.notImplemented();
+                }
+            }
+        ); // end for Activate Administrator Access
+
+        // 6 method Channel for Allow battery Optimization
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL_DISABLE_BATTERY_OPTIMIZATION).setMethodCallHandler(
+        (call, result) -> {
+            if (call.method.equals("disableBatteryOptimization")) {
+               boolean isDisabled = disableBatteryOptimization();
+               result.success(isDisabled);
+            } else {
+               result.notImplemented();
+            }
+        }
+        ); // end Allow battery Optimization
+
+        // method for get the installed apps
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL_INSTALLED_APPS)
+            .setMethodCallHandler(
+                (call, result) -> {
+                    if (call.method.equals("getInstalledApps")) {
+                        Map<String, Object> response = new HashMap<>();
+                        List<Map<String, Object>> installedApps = getInstalledApps();
+                        response.put("apps", installedApps);  // Wrap installed apps in "apps" key
+                        result.success(response);
+                    } else {
+                        result.notImplemented();
+                    }
+                }
+        ); // end of get installed apps 
+       
+    }
+
+    // 1 Method to check if Google Play Services is available
+    private boolean checkGooglePlayServices() {
+        GoogleApiAvailability googleApiAvailability = GoogleApiAvailability.getInstance();
+        int resultCode = googleApiAvailability.isGooglePlayServicesAvailable(this);
+        
+        if (resultCode == ConnectionResult.SUCCESS) {
+            return true;  // Google Play Services is available
+        } else {
+            // Optional: Show dialog to resolve the error (e.g., update Play Services)
+            if (googleApiAvailability.isUserResolvableError(resultCode)) {
+                googleApiAvailability.getErrorDialog(this, resultCode, 2404).show();
+            } else {
+                Toast.makeText(this, "Google Play Services is not available on this device", Toast.LENGTH_LONG).show();
+            }
+            return false;
+        }
+    }
+
+    // 1 Method to open Google Play Services in the Play Store
+    private void openGooglePlayServices() {
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setData(Uri.parse("market://details?id=com.google.android.gms"));
+        intent.setPackage("com.android.vending");
+
+        if (intent.resolveActivity(getPackageManager()) != null) {
+            startActivity(intent);
+        } else {
+            Toast.makeText(this, "Google Play Store is not available on this device", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /* private void openGooglePlayServices() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse("market://details?id=com.google.android.gms"));
+            intent.setPackage("com.android.vending");
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                startActivity(intent);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    } */
+
+    // 2 Method to open the Accessibility Settings
+    public void openAccessibilitySettings() {
+        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        startActivity(intent);
+    }
+
+    // // Method to open the Usage Access
+    // 3 Request Usage Access
+    private void requestUsageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+            startActivity(intent);
+        }
+    }
+
+    // 3 Check for System Updates (just opens system update settings)
+    private void openSystemUpdateSettings() {
+        try {
+            // Different intents depending on Android version or manufacturer
+            Intent intent = new Intent();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // For newer versions, open software update settings
+                intent.setAction(Settings.ACTION_DEVICE_INFO_SETTINGS);
+            } else {
+                // For older versions, try to open system settings
+                intent.setAction(Settings.ACTION_SETTINGS);
+            }
+            startActivity(intent);
+        } catch (Exception e) {
+            // Fallback: Open general settings if something goes wrong
+            Intent fallbackIntent = new Intent(Settings.ACTION_SETTINGS);
+            startActivity(fallbackIntent);
+        }
+    }
+
+
+    // 4 Method to the notification permissions
+    private boolean requestNotificationListenerPermission() {
+        Context context = getApplicationContext();
+        String enabledListeners = Settings.Secure.getString(context.getContentResolver(), "enabled_notification_listeners");
+        String packageName = context.getPackageName();
+
+        if (enabledListeners == null || !enabledListeners.contains(packageName)) {
+            // If the current package is not in the list of enabled listeners, prompt the user
+            Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+
+            Toast.makeText(context, "Enable notification access for the app.", Toast.LENGTH_LONG).show();
+            return false;
+        } else {
+            // Access is already granted
+            Toast.makeText(context, "Notification access is already granted.", Toast.LENGTH_LONG).show();
+            return true;
+        }
+
+    }
+
+    // 5 Method for Activate the Administrator Access
+    private void requestDeviceAdminAccess() {
+        DevicePolicyManager devicePolicyManager =
+            (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName adminComponent = new ComponentName(this, MyDeviceAdminReceiver.class);
+
+        Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+        intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
+        startActivityForResult(intent, REQUEST_CODE_ENABLE_ADMIN);
+    }
+
+    // 6 Method for disable battery optimization
+    private boolean disableBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+          intent.setData(Uri.parse("package:" + getPackageName()));
+          startActivity(intent);
+          return true;
+        }
+        return false;
+    }
+
+
+    // Get installed apps with additional information
+    private List<Map<String, Object>> getInstalledApps() {
+        PackageManager packageManager = getPackageManager();
+        List<ApplicationInfo> apps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA);
+        List<Map<String, Object>> installedApps = new ArrayList<>();
+
+        for (ApplicationInfo app : apps) {
+            Map<String, Object> appInfo = new HashMap<>();
+            appInfo.put("appName", packageManager.getApplicationLabel(app).toString());
+            appInfo.put("packageName", app.packageName);
+
+            // Example of hardcoded child and parent information
+            appInfo.put("child_id", 22); // You can modify this logic as needed
+            appInfo.put("child_name", "rekson");
+            appInfo.put("parent_id", 2);
+            appInfo.put("parent_name", "charokhan");
+
+            try {
+                Drawable iconDrawable = packageManager.getApplicationIcon(app.packageName);
+                Bitmap iconBitmap = drawableToBitmap(iconDrawable);
+                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                iconBitmap.compress(Bitmap.CompressFormat.PNG, 100, byteArrayOutputStream);
+                byte[] iconBytes = byteArrayOutputStream.toByteArray();
+                String iconBase64 = Base64.encodeToString(iconBytes, Base64.NO_WRAP);
+                appInfo.put("icon", iconBase64);
+            } catch (NameNotFoundException e) {
+                e.printStackTrace();
+            }
+
+            installedApps.add(appInfo);
+        }
+
+        return installedApps;
+    }
+
+    // Convert Drawable to Bitmap
+    private Bitmap drawableToBitmap(Drawable drawable) {
+        if (drawable instanceof BitmapDrawable) {
+            return ((BitmapDrawable) drawable).getBitmap();
+        } else {
+            Bitmap bitmap = Bitmap.createBitmap(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(), Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+            drawable.draw(canvas);
+            return bitmap;
+        }
+    }
+
+
+
+}
